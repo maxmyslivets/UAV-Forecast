@@ -37,16 +37,20 @@
       background: #0f172a;
       z-index: 1; /* карта ниже шапки */
     }
-    .dark-map .leaflet-tile {
+    /* Эффект темной карты применяется только к схеме OSM, но не к спутнику */
+    .dark-map .osm-tile-layer {
       filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
     }
-    .leaflet-bar a {
+    .leaflet-bar a, .leaflet-control-layers {
       background-color: #1e293b !important;
       color: #cbd5e1 !important;
-      border-bottom: 1px solid #334155 !important;
+      border: 1px solid #334155 !important;
     }
     .leaflet-bar a:hover {
       background-color: #334155 !important;
+    }
+    .leaflet-control-layers-list {
+      color: #cbd5e1 !important;
     }
     .wind-zone-legend {
       display: flex;
@@ -104,7 +108,7 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-cyan-500 selection:text-slate-950">
 
-  <!-- Исправленная навигационная панель -->
+  <!-- Навигационная панель -->
   <header class="sticky-header">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <div class="flex items-center space-x-3">
@@ -116,7 +120,7 @@
           <p class="text-[10px] text-cyan-400 font-medium uppercase tracking-widest">Аналитика полетных метеоусловий</p>
         </div>
       </div>
-      
+
       <!-- Поиск локации и кнопка геопозиции -->
       <div class="flex items-center space-x-2 relative max-w-xs sm:max-w-sm w-full justify-end">
         <div class="relative w-full">
@@ -133,7 +137,7 @@
 
   <!-- Основной контент -->
   <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full space-y-6">
-    
+
     <!-- Информационная строка о выбранной локации -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-900/40 border border-slate-800/60 p-4 rounded-2xl">
       <div class="flex items-start space-x-3">
@@ -146,7 +150,7 @@
           <p id="location-coords" class="text-xs text-slate-400 mt-0.5">Шир: 55.1927 | Долг: 30.2064</p>
         </div>
       </div>
-      
+
       <!-- Календарь для выбора дня полета -->
       <div class="flex items-center space-x-3 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 shadow-inner">
         <div class="text-slate-400 flex items-center space-x-1.5">
@@ -167,7 +171,7 @@
             </div>
             <div>
               <h3 class="text-base font-bold text-white">Выбор географической точки</h3>
-              <p class="text-xs text-slate-400 mt-0.5">Кликните по карте для выбора полетной локации</p>
+              <p class="text-xs text-slate-400 mt-0.5">Кликните по карте для выбора полетной локации или переключите на спутник</p>
             </div>
           </div>
           <div class="text-right hidden sm:block">
@@ -179,9 +183,9 @@
       </section>
     </div>
 
-    <!-- Раздел детализированных графиков (остаётся без изменений) -->
+    <!-- Раздел детализированных графиков -->
     <div class="space-y-6">
-      
+
       <!-- Панель 1: График Ветра + Вероятность осадков (авиационный метод порывов) -->
       <section class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
         <div class="space-y-6">
@@ -201,11 +205,11 @@
                 <button id="forecast-tab-10days" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">10 Дней</button>
               </div>
             </div>
-            
+
             <div class="relative w-full h-80">
               <canvas id="windChart"></canvas>
             </div>
-            
+
             <!-- Кастомная легенда зон ветра -->
             <div class="wind-zone-legend">
               <div class="legend-item"><div class="legend-color" style="background: rgba(16,185,129,0.3); border-left: 2px solid #10b981;"></div><span>0–6 м/с — безопасно</span></div>
@@ -253,12 +257,26 @@
             </div>
 
             <!-- Панель расчётных значений -->
-            <div id="calculation-panel" class="bg-slate-900/60 border border-slate-700/70 rounded-xl p-3 text-xs grid grid-cols-2 md:grid-cols-3 gap-2">
-              <div class="col-span-2"><span class="text-slate-400">Методика:</span> степенной закон (Hellmann) + порывы по авиационной формуле V_gust = V_gust0·(H/H₀)^(α/2)</div>
-              <div><span class="text-slate-400">Высота H:</span> <span id="calc-height" class="text-cyan-300 font-bold">--</span> м</div>
-              <div><span class="text-slate-400">(H/H₀)^α:</span> <span id="calc-power-ratio" class="text-cyan-300">--</span></div>
-              <div><span class="text-slate-400">Ср. ветер V:</span> <span id="calc-v-avg" class="text-cyan-300">--</span> м/с</div>
-              <div><span class="text-slate-400">Порывы (авиа):</span> <span id="calc-gust-alt" class="text-orange-300">--</span> м/с</div>
+            <div id="calculation-panel" class="bg-slate-900/60 dark:bg-slate-900/60 light:bg-white border border-slate-700/70 dark:border-slate-700/70 light:border-slate-200 rounded-xl p-4 text-xs grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+              <div class="md:col-span-5 text-slate-500 dark:text-slate-400 light:text-slate-500 border-b border-slate-800 dark:border-slate-800 light:border-slate-100 pb-2">
+                <span class="font-bold uppercase tracking-wider text-[10px]">Методика расчета:</span> степенной закон (Hellmann) + порывы по авиационной формуле V_gust = V_gust0·(H/H₀)^(α/2)
+              </div>
+              <div class="flex justify-between md:flex-col md:justify-center gap-1">
+                <span class="text-slate-400 dark:text-slate-400 light:text-slate-500">Высота H, м:</span>
+                <span class="text-cyan-500 dark:text-cyan-300 font-bold"><span id="calc-height">--</span></span>
+              </div>
+              <div class="flex justify-between md:flex-col md:justify-center gap-1">
+                <span class="text-slate-400 dark:text-slate-400 light:text-slate-500">Множитель (H/H₀)^α:</span>
+                <span id="calc-power-ratio" class="text-cyan-500 dark:text-cyan-300 font-semibold">--</span>
+              </div>
+              <div class="flex justify-between md:flex-col md:justify-center gap-1">
+                <span class="text-slate-400 dark:text-slate-400 light:text-slate-500">Ср. ветер V, м/с:</span>
+                <span id="calc-v-avg" class="text-cyan-500 dark:text-cyan-300 font-bold">--</span>
+              </div>
+              <div class="flex justify-between md:flex-col md:justify-center gap-1">
+                <span class="text-slate-400 dark:text-slate-400 light:text-slate-500">Порывы (авиа), м/с:</span>
+                <span id="calc-gust-alt" class="text-orange-500 dark:text-orange-300 font-bold">--</span>
+              </div>
             </div>
           </div>
         </div>
@@ -411,8 +429,31 @@
     function initMap() {
       try {
         state.mapInstance = L.map('map').setView([state.lat, state.lng], 9);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(state.mapInstance);
+
+        // Стандартный слой схемы OpenStreetMap с кастомным CSS классом
+        const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          className: 'osm-tile-layer'
+        });
+
+        // Слой спутниковых снимков от Esri
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 19,
+          attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        });
+
+        // По умолчанию подключаем схему
+        streetLayer.addTo(state.mapInstance);
+
+        // Настройка панели переключения слоев карты
+        const baseMaps = {
+          "Схема": streetLayer,
+          "Спутник": satelliteLayer
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(state.mapInstance);
+
         state.mapMarker = L.marker([state.lat, state.lng], { draggable: true }).addTo(state.mapInstance);
+
         state.mapInstance.on('click', (e) => updateLocationFromCoords(e.latlng.lat, e.latlng.lng));
         state.mapMarker.on('dragend', () => {
           const pos = state.mapMarker.getLatLng();
@@ -574,14 +615,14 @@
       let labels = [], windData = [], gustData = [], rainProbData = [];
       let tempData = [], humData = [], icingRiskData = [];
       const alt = state.currentAltitude;
-      
+
       const forecastList = (state.currentMode === "1day") ? state.hourlyForecast : state.dailyForecastGrouped.map(d => d.parts.afternoon);
       if (state.currentMode === "1day") {
         labels = state.hourlyForecast.map(h => `${String(h.hour).padStart(2, '0')}:00`);
       } else {
         labels = state.dailyForecastGrouped.map(d => d.dateLabel.split(',')[0]);
       }
-      
+
       for (let item of forecastList) {
         const v0 = item.windSpeed;
         const gust0 = item.windGusts;
@@ -593,7 +634,7 @@
         humData.push(item.humidity);
         icingRiskData.push(computeIcingRisk(item.temp, item.humidity));
       }
-      
+
       // ========== ГРАФИК ВЕТРА (средний + порывы авиа) ==========
       if (!state.windChartInstance) {
         const ctx = document.getElementById('windChart').getContext('2d');
@@ -612,7 +653,14 @@
             plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } }, tooltip: { backgroundColor: '#0f172a', cornerRadius: 12 } },
             scales: {
               x: { grid: { color: 'rgba(51,65,85,0.1)' }, ticks: { color: '#94a3b8', font: { size: 9 } } },
-              y: { position: 'left', grid: { color: 'rgba(51,65,85,0.15)' }, ticks: { color: '#94a3b8', font: { size: 9 } }, min: 0, max: Math.max(25, Math.max(...gustData) + 3) },
+              y: {
+                position: 'left',
+                grid: { color: 'rgba(51,65,85,0.15)' },
+                ticks: { color: '#94a3b8', font: { size: 9 } },
+                min: 0,
+                max: Math.max(25, Math.max(...gustData) + 3),
+                title: { display: true, text: 'Скорость ветра / порывов (м/с)', color: '#06b6d4', font: { size: 10, weight: 'bold' } }
+              },
               yPrecip: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#94a3b8', font: { size: 9 } }, min: 0, max: 100, title: { display: true, text: 'Вероятность осадков (%)', color: '#a78bfa', font: { size: 9, weight: 'bold' } } }
             }
           },
@@ -642,6 +690,7 @@
         state.windChartInstance.data.datasets[1].data = gustData;
         state.windChartInstance.data.datasets[2].data = rainProbData;
         state.windChartInstance.options.scales.y.max = Math.max(25, Math.max(...gustData) + 3);
+        state.windChartInstance.data.datasets[0].label = `Средний ветер на ${alt}м (м/с)`;
         state.windChartInstance.update('none');
       }
       
