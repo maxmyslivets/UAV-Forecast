@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UAV Advanced Wind Profile | Обледенение + Авиационный метод порывов</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts (Inter) -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Leaflet Map CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+    .leaflet-container {
+      background: #0f172a;
+      z-index: 1; /* карта ниже шапки */
+    }
+    .dark-map .leaflet-tile {
+      filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+    }
+    .leaflet-bar a {
+      background-color: #1e293b !important;
+      color: #cbd5e1 !important;
+      border-bottom: 1px solid #334155 !important;
+    }
+    .leaflet-bar a:hover {
+      background-color: #334155 !important;
+    }
+    .wind-zone-legend {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 0.5rem;
+      font-size: 0.7rem;
+      color: #94a3b8;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .legend-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 2px;
+    }
+    .terrain-selector {
+      background: #0f172a;
+      border-radius: 2rem;
+      padding: 0.25rem;
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      justify-content: center;
+    }
+    .terrain-btn {
+      padding: 0.4rem 1rem;
+      border-radius: 2rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      transition: all 0.2s;
+      cursor: pointer;
+      background: transparent;
+      color: #94a3b8;
+    }
+    .terrain-btn.active {
+      background: #06b6d4;
+      color: #0f172a;
+      box-shadow: 0 2px 6px rgba(6,182,212,0.3);
+    }
+    /* Фикс шапки: полностью непрозрачная + высокий z-index */
+    .sticky-header {
+      background-color: #0f172a; /* slate-900 */
+      border-bottom: 1px solid #1e293b;
+      backdrop-filter: none;
+      z-index: 1000;
+      position: sticky;
+      top: 0;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-cyan-500 selection:text-slate-950">
+
+  <!-- Исправленная навигационная панель -->
+  <header class="sticky-header">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="bg-gradient-to-tr from-cyan-500 to-blue-600 p-2 rounded-xl text-slate-950 shadow-lg shadow-cyan-500/20">
+          <i data-lucide="plane-takeoff" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">UAV FORECAST</h1>
+          <p class="text-[10px] text-cyan-400 font-medium uppercase tracking-widest">Аналитика полетных метеоусловий</p>
+        </div>
+      </div>
+      
+      <!-- Поиск локации и кнопка геопозиции -->
+      <div class="flex items-center space-x-2 relative max-w-xs sm:max-w-sm w-full justify-end">
+        <div class="relative w-full">
+          <input type="text" id="search-input" placeholder="Поиск города..." class="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 text-white placeholder-slate-400 transition-all">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+          <div id="search-results" class="absolute left-0 right-0 mt-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl hidden max-h-60 overflow-y-auto z-50 custom-scrollbar"></div>
+        </div>
+        <button id="geo-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2.5 rounded-xl border border-slate-700 transition-all flex items-center justify-center shrink-0" title="Определить мое местоположение">
+          <i data-lucide="map-pin" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Основной контент -->
+  <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full space-y-6">
+    
+    <!-- Информационная строка о выбранной локации -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-900/40 border border-slate-800/60 p-4 rounded-2xl">
+      <div class="flex items-start space-x-3">
+        <div class="p-2 bg-slate-800 rounded-xl mt-1 text-cyan-400">
+          <i data-lucide="navigation" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <span class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Анализируемая область</span>
+          <h2 id="location-name" class="text-lg font-bold text-white">Витебск, Беларусь</h2>
+          <p id="location-coords" class="text-xs text-slate-400 mt-0.5">Шир: 55.1927 | Долг: 30.2064</p>
+        </div>
+      </div>
+      
+      <!-- Календарь для выбора дня полета -->
+      <div class="flex items-center space-x-3 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 shadow-inner">
+        <div class="text-slate-400 flex items-center space-x-1.5">
+          <i data-lucide="calendar" class="w-4 h-4 text-cyan-400"></i>
+          <label for="flight-date" class="text-xs font-semibold uppercase tracking-wider">Дата миссии:</label>
+        </div>
+        <input type="date" id="flight-date" class="bg-transparent text-sm font-bold text-white focus:outline-none cursor-pointer">
+      </div>
+    </div>
+
+    <!-- Интерактивная карта -->
+    <div class="w-full relative z-0">
+      <section class="bg-slate-900 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
+              <i data-lucide="map" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-white">Выбор географической точки</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Кликните по карте для выбора полетной локации</p>
+            </div>
+          </div>
+          <div class="text-right hidden sm:block">
+            <p class="text-[10px] text-slate-500 uppercase font-semibold">Данные получены</p>
+            <p id="update-time" class="text-xs text-slate-300 font-medium">--:--</p>
+          </div>
+        </div>
+        <div class="relative w-full h-80 rounded-2xl overflow-hidden border border-slate-800 dark-map shadow-inner" id="map"></div>
+      </section>
+    </div>
+
+    <!-- Раздел детализированных графиков (остаётся без изменений) -->
+    <div class="space-y-6">
+      
+      <!-- Панель 1: График Ветра + Вероятность осадков (авиационный метод порывов) -->
+      <section class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+        <div class="space-y-6">
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center space-x-3">
+                <div class="p-2 bg-sky-500/10 rounded-lg text-sky-400">
+                  <i data-lucide="wind" class="w-5 h-5"></i>
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-white">Прогноз ветровой нагрузки и вероятность осадков</h3>
+                  <p class="text-[11px] text-slate-400">Средняя скорость ветра (степенной закон) и авиационная модель порывов: V_gust = V_gust0·(H/H₀)^(α/2)</p>
+                </div>
+              </div>
+              <div class="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-semibold">
+                <button id="forecast-tab-1day" class="px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 transition-all">24 Часа</button>
+                <button id="forecast-tab-10days" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">10 Дней</button>
+              </div>
+            </div>
+            
+            <div class="relative w-full h-80">
+              <canvas id="windChart"></canvas>
+            </div>
+            
+            <!-- Кастомная легенда зон ветра -->
+            <div class="wind-zone-legend">
+              <div class="legend-item"><div class="legend-color" style="background: rgba(16,185,129,0.3); border-left: 2px solid #10b981;"></div><span>0–6 м/с — безопасно</span></div>
+              <div class="legend-item"><div class="legend-color" style="background: rgba(245,158,11,0.3); border-left: 2px solid #f59e0b;"></div><span>6–10 м/с — осторожно</span></div>
+              <div class="legend-item"><div class="legend-color" style="background: rgba(249,115,22,0.3); border-left: 2px solid #f97316;"></div><span>10–12 м/с — высокий риск</span></div>
+              <div class="legend-item"><div class="legend-color" style="background: rgba(239,68,68,0.3); border-left: 2px solid #ef4444;"></div><span>12+ м/с — запрет полётов</span></div>
+            </div>
+          </div>
+
+          <!-- Симулятор высоты + выбор местности + панель расчётов -->
+          <div class="bg-slate-950/70 border border-slate-800/80 p-5 rounded-2xl space-y-5">
+            <!-- Слайдер высоты -->
+            <div class="flex flex-col md:flex-row md:items-center gap-4">
+              <div class="flex items-center space-x-3 shrink-0">
+                <div class="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
+                  <i data-lucide="sliders" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <h4 class="text-xs font-extrabold text-white uppercase tracking-wider">Высота полёта</h4>
+                  <p class="text-[10px] text-slate-500">Степенной профиль ветра</p>
+                </div>
+              </div>
+              <div class="flex-grow flex items-center space-x-3">
+                <span class="text-[10px] text-slate-500 font-semibold shrink-0">10 м</span>
+                <input type="range" id="altitude-slider" min="10" max="200" value="100" class="w-full accent-cyan-500 bg-slate-800 h-1.5 rounded-lg appearance-none cursor-pointer">
+                <span class="text-[10px] text-slate-500 font-semibold shrink-0">200 м</span>
+              </div>
+              <div class="bg-slate-900 border border-slate-800/80 px-4 py-2 rounded-xl flex items-center space-x-4 shrink-0">
+                <div class="flex items-center space-x-1.5">
+                  <span class="text-[10px] text-slate-500 font-semibold uppercase">Высота:</span>
+                  <span id="target-altitude-display" class="text-xs font-black text-cyan-400">100 м</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Выбор типа подстилающей поверхности -->
+            <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-800/30 p-3 rounded-xl">
+              <span class="text-xs font-medium text-slate-300">Тип местности (шероховатость):</span>
+              <div class="terrain-selector" id="terrain-selector">
+                <button data-terrain="A" class="terrain-btn">Открытое поле (α=0.15, z₀=0.03)</button>
+                <button data-terrain="B" class="terrain-btn active">Деревня / редкий лес (α=0.20, z₀=0.1)</button>
+                <button data-terrain="C" class="terrain-btn">Густой лес / пригород (α=0.25, z₀=0.5)</button>
+                <button data-terrain="D" class="terrain-btn">Городская застройка (α=0.30, z₀=1.0)</button>
+              </div>
+            </div>
+
+            <!-- Панель расчётных значений -->
+            <div id="calculation-panel" class="bg-slate-900/60 border border-slate-700/70 rounded-xl p-3 text-xs grid grid-cols-2 md:grid-cols-3 gap-2">
+              <div class="col-span-2"><span class="text-slate-400">Методика:</span> степенной закон (Hellmann) + порывы по авиационной формуле V_gust = V_gust0·(H/H₀)^(α/2)</div>
+              <div><span class="text-slate-400">Высота H:</span> <span id="calc-height" class="text-cyan-300 font-bold">--</span> м</div>
+              <div><span class="text-slate-400">(H/H₀)^α:</span> <span id="calc-power-ratio" class="text-cyan-300">--</span></div>
+              <div><span class="text-slate-400">Ср. ветер V:</span> <span id="calc-v-avg" class="text-cyan-300">--</span> м/с</div>
+              <div><span class="text-slate-400">Порывы (авиа):</span> <span id="calc-gust-alt" class="text-orange-300">--</span> м/с</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Панель 2: Риск обледенения -->
+      <section class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+        <div class="flex items-center space-x-3 mb-4">
+          <div class="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+            <i data-lucide="thermometer-snowflake" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Риск обледенения пропеллеров, температура и влажность</h3>
+            <p class="text-[11px] text-slate-400">Оценка вероятности обледенения дрона на основе температуры воздуха и относительной влажности. Высокий риск при температуре от -10°C до +2°C и влажности > 65%.</p>
+          </div>
+        </div>
+        <div class="relative w-full h-80">
+          <canvas id="icingChart"></canvas>
+        </div>
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- Футер -->
+  <footer class="border-t border-slate-900 bg-slate-950/90 py-6 mt-12 text-slate-500 text-xs text-center">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center space-x-2">
+        <i data-lucide="shield-check" class="w-4 h-4 text-cyan-500"></i>
+        <span>Всегда визуально контролируйте дрон при запуске.</span>
+      </div>
+      <p>© 2026 Max Myslivets. Использует Open-Meteo API и модель изменения ветра на высоте: степенной закон + авиационный метод порывов.</p>
+    </div>
+  </footer>
+
+  <script>
+    lucide.createIcons();
+
+    // Параметры сценариев (добавлен городской тип)
+    const TERRAIN = {
+      A: { alpha: 0.15, z0: 0.03, name: "Открытое поле" },
+      B: { alpha: 0.20, z0: 0.1, name: "Пригород / редкий лес" },
+      C: { alpha: 0.25, z0: 0.5, name: "Густой лес" },
+      D: { alpha: 0.30, z0: 1.0, name: "Городская застройка" }
+    };
+    const H0 = 10;       // эталонная высота, м
+
+    let currentTerrain = "B"; // по умолчанию пригород
+
+    const state = {
+      lat: 55.1927,
+      lng: 30.2064,
+      locationName: "Витебск, Беларусь",
+      fullHourlyList: [],
+      hourlyForecast: [],
+      dailyForecastGrouped: [],
+      currentAltitude: 100,
+      windChartInstance: null,
+      icingChartInstance: null,
+      mapInstance: null,
+      mapMarker: null,
+      currentMode: "1day"
+    };
+
+    function getEl(id) { return document.getElementById(id) || { textContent: "", value: "", classList: { add() {}, remove() {} }, addEventListener() {} }; }
+    const els = {
+      get searchInput() { return getEl('search-input'); },
+      get searchResults() { return getEl('search-results'); },
+      get geoBtn() { return getEl('geo-btn'); },
+      get locationName() { return getEl('location-name'); },
+      get locationCoords() { return getEl('location-coords'); },
+      get updateTime() { return getEl('update-time'); },
+      get flightDate() { return getEl('flight-date'); },
+      get altitudeSlider() { return getEl('altitude-slider'); },
+      get targetAltitudeDisplay() { return getEl('target-altitude-display'); },
+      get forecastTab1day() { return getEl('forecast-tab-1day'); },
+      get forecastTab10days() { return getEl('forecast-tab-10days'); }
+    };
+
+    // Расчёт средней скорости и порывов (только авиационный метод)
+    function computeWindAtHeight(v0, gust0, height, terrainKey) {
+      const { alpha } = TERRAIN[terrainKey];
+      const ratio = height / H0;
+      const powerFactor = Math.pow(ratio, alpha);
+      const vAvg = v0 * powerFactor;   // средняя скорость на высоте H
+      // Авиационный метод порывов (уменьшенный градиент)
+      const gustAlt = gust0 * Math.pow(ratio, alpha / 2);
+      return { vAvg, gustAlt, powerFactor };
+    }
+
+    // Обновление панели расчётов
+    function updateCalculationPanel() {
+      if (!state.hourlyForecast.length) return;
+      const firstHour = state.hourlyForecast[0];
+      const v0 = firstHour.windSpeed;
+      const gust0 = firstHour.windGusts;
+      const H = state.currentAltitude;
+      const { vAvg, gustAlt, powerFactor } = computeWindAtHeight(v0, gust0, H, currentTerrain);
+      document.getElementById('calc-height').innerText = H;
+      document.getElementById('calc-power-ratio').innerText = powerFactor.toFixed(3);
+      document.getElementById('calc-v-avg').innerText = vAvg.toFixed(2);
+      document.getElementById('calc-gust-alt').innerText = gustAlt.toFixed(2);
+    }
+
+    function init() {
+      initDateSelector();
+      initMap();
+      initTerrainSelector();
+      fetchWeatherData();
+      setupEventListeners();
+    }
+
+    function initTerrainSelector() {
+      const container = document.getElementById('terrain-selector');
+      if (!container) return;
+      const btns = container.querySelectorAll('.terrain-btn');
+      btns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const terrain = btn.getAttribute('data-terrain');
+          if (!terrain) return;
+          currentTerrain = terrain;
+          btns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          updateCharts();
+          updateCalculationPanel();
+        });
+      });
+    }
+
+    function initDateSelector() {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+      const maxDate = new Date();
+      maxDate.setDate(today.getDate() + 9);
+      const maxYyyy = maxDate.getFullYear();
+      const maxMm = String(maxDate.getMonth() + 1).padStart(2, '0');
+      const maxDd = String(maxDate.getDate()).padStart(2, '0');
+      els.flightDate.min = todayStr;
+      els.flightDate.max = `${maxYyyy}-${maxMm}-${maxDd}`;
+      els.flightDate.value = todayStr;
+    }
+
+    if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', init);
+    else init();
+
+    function initMap() {
+      try {
+        state.mapInstance = L.map('map').setView([state.lat, state.lng], 9);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(state.mapInstance);
+        state.mapMarker = L.marker([state.lat, state.lng], { draggable: true }).addTo(state.mapInstance);
+        state.mapInstance.on('click', (e) => updateLocationFromCoords(e.latlng.lat, e.latlng.lng));
+        state.mapMarker.on('dragend', () => {
+          const pos = state.mapMarker.getLatLng();
+          updateLocationFromCoords(pos.lat, pos.lng);
+        });
+      } catch(e) { console.error(e); }
+    }
+
+    async function updateLocationFromCoords(lat, lng) {
+      state.lat = lat; state.lng = lng;
+      if (state.mapMarker) state.mapMarker.setLatLng([lat, lng]);
+      if (state.mapInstance) state.mapInstance.panTo([lat, lng]);
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=ru`);
+        const data = await res.json();
+        let place = data.address.city || data.address.town || data.address.village || data.address.suburb || data.address.county || "Выбранное место";
+        let country = data.address.country ? `, ${data.address.country}` : "";
+        state.locationName = place + country;
+      } catch(e) { state.locationName = "Точка на карте"; }
+      fetchWeatherData();
+    }
+
+    function setupEventListeners() {
+      els.flightDate.addEventListener('change', () => filterDataBySelectedDate());
+      els.altitudeSlider.addEventListener('input', (e) => {
+        state.currentAltitude = parseInt(e.target.value);
+        els.targetAltitudeDisplay.textContent = `${state.currentAltitude} м`;
+        updateCharts();
+        updateCalculationPanel();
+      });
+      els.forecastTab1day.addEventListener('click', () => toggleMode("1day"));
+      els.forecastTab10days.addEventListener('click', () => toggleMode("10days"));
+      els.geoBtn.addEventListener('click', getUserLocation);
+      els.searchInput.addEventListener('input', debounce(async (e) => {
+        const query = e.target.value.trim();
+        if (query.length < 2) { els.searchResults.classList.add('hidden'); return; }
+        try {
+          const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=ru`);
+          const data = await res.json();
+          if (data.results && data.results.length) renderSearchResults(data.results);
+          else { els.searchResults.innerHTML = `<div class="p-4 text-sm text-slate-500">Город не найден</div>`; els.searchResults.classList.remove('hidden'); }
+        } catch(err) { console.error(err); }
+      }, 400));
+      document.addEventListener('click', (e) => {
+        if (!els.searchInput.contains(e.target) && !els.searchResults.contains(e.target)) els.searchResults.classList.add('hidden');
+      });
+    }
+
+    function toggleMode(mode) {
+      state.currentMode = mode;
+      const btn1 = els.forecastTab1day, btn10 = els.forecastTab10days;
+      if (mode === "1day") {
+        btn1.className = "px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 transition-all";
+        btn10.className = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all";
+      } else {
+        btn10.className = "px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 transition-all";
+        btn1.className = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all";
+      }
+      updateCharts();
+    }
+
+    function debounce(func, wait) { let timeout; return function(...args) { clearTimeout(timeout); timeout = setTimeout(() => func(...args), wait); }; }
+
+    function renderSearchResults(cities) {
+      els.searchResults.innerHTML = '';
+      cities.forEach(city => {
+        const country = city.country ? `, ${city.country}` : '';
+        const region = city.admin1 ? ` (${city.admin1})` : '';
+        const item = document.createElement('div');
+        item.className = "p-3 hover:bg-slate-800 cursor-pointer text-sm border-b border-slate-800 last:border-0 transition-colors";
+        item.innerHTML = `<div class="font-semibold text-white">${city.name}${country}</div><div class="text-[11px] text-slate-400 mt-0.5">${region}</div>`;
+        item.addEventListener('click', () => {
+          state.lat = city.latitude; state.lng = city.longitude;
+          state.locationName = city.name + (city.country ? `, ${city.country_code.toUpperCase()}` : '');
+          els.searchResults.classList.add('hidden'); els.searchInput.value = '';
+          if (state.mapMarker && state.mapInstance) {
+            state.mapMarker.setLatLng([state.lat, state.lng]);
+            state.mapInstance.setView([state.lat, state.lng], 9);
+          }
+          fetchWeatherData();
+        });
+        els.searchResults.appendChild(item);
+      });
+      els.searchResults.classList.remove('hidden');
+    }
+
+    function getUserLocation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => updateLocationFromCoords(pos.coords.latitude, pos.coords.longitude),
+          () => fetchWeatherData()
+        );
+      } else fetchWeatherData();
+    }
+
+    async function fetchWeatherData() {
+      els.locationName.textContent = "Обновление данных...";
+      els.locationCoords.textContent = `Шир: ${state.lat.toFixed(4)} | Долг: ${state.lng.toFixed(4)}`;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lng}&current=temperature_2m,relative_humidity_2m&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m&wind_speed_unit=ms&timezone=auto&forecast_days=10`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const hourly = data.hourly;
+        state.fullHourlyList = hourly.time.map((timeStr, idx) => {
+          const forecastDate = new Date(timeStr);
+          return {
+            time: forecastDate,
+            hour: forecastDate.getHours(),
+            temp: Math.round(hourly.temperature_2m[idx]),
+            humidity: hourly.relative_humidity_2m[idx],
+            windSpeed: Math.round(hourly.wind_speed_10m[idx]),
+            windGusts: Math.round(hourly.wind_gusts_10m[idx]),
+            rainProb: hourly.precipitation_probability[idx] || 0,
+            precipitation: hourly.precipitation[idx]
+          };
+        });
+        const dailyGroups = {};
+        state.fullHourlyList.forEach(item => {
+          const key = item.time.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+          if (!dailyGroups[key]) dailyGroups[key] = [];
+          dailyGroups[key].push(item);
+        });
+        state.dailyForecastGrouped = Object.keys(dailyGroups).map(dateKey => {
+          const list = dailyGroups[dateKey];
+          const afternoon = list.find(h => h.hour === 14) || list[Math.min(14, list.length-1)];
+          return { dateLabel: dateKey, parts: { afternoon } };
+        }).slice(0, 10);
+        filterDataBySelectedDate();
+      } catch(err) {
+        console.error(err);
+        els.locationName.textContent = "Ошибка загрузки данных";
+        els.locationCoords.textContent = "Проверьте подключение.";
+      }
+    }
+
+    function filterDataBySelectedDate() {
+      if (!state.fullHourlyList.length) return;
+      const selectedDateStr = els.flightDate.value;
+      state.hourlyForecast = state.fullHourlyList.filter(item => {
+        const year = item.time.getFullYear();
+        const month = String(item.time.getMonth() + 1).padStart(2, '0');
+        const day = String(item.time.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}` === selectedDateStr;
+      });
+      updateUI();
+    }
+
+    function updateUI() {
+      els.locationName.textContent = state.locationName;
+      els.updateTime.textContent = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      updateCalculationPanel();
+      updateCharts();
+    }
+
+    // Обновление графиков (только средний ветер и порывы по авиаметоду)
+    function updateCharts() {
+      if (state.hourlyForecast.length === 0) return;
+      let labels = [], windData = [], gustData = [], rainProbData = [];
+      let tempData = [], humData = [], icingRiskData = [];
+      const alt = state.currentAltitude;
+      
+      const forecastList = (state.currentMode === "1day") ? state.hourlyForecast : state.dailyForecastGrouped.map(d => d.parts.afternoon);
+      if (state.currentMode === "1day") {
+        labels = state.hourlyForecast.map(h => `${String(h.hour).padStart(2, '0')}:00`);
+      } else {
+        labels = state.dailyForecastGrouped.map(d => d.dateLabel.split(',')[0]);
+      }
+      
+      for (let item of forecastList) {
+        const v0 = item.windSpeed;
+        const gust0 = item.windGusts;
+        const { vAvg, gustAlt } = computeWindAtHeight(v0, gust0, alt, currentTerrain);
+        windData.push(vAvg);
+        gustData.push(gustAlt);
+        rainProbData.push(item.rainProb);
+        tempData.push(item.temp);
+        humData.push(item.humidity);
+        icingRiskData.push(computeIcingRisk(item.temp, item.humidity));
+      }
+      
+      // ========== ГРАФИК ВЕТРА (средний + порывы авиа) ==========
+      if (!state.windChartInstance) {
+        const ctx = document.getElementById('windChart').getContext('2d');
+        state.windChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              { label: `Средний ветер на ${alt}м (м/с)`, data: windData, borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.05)', tension: 0.35, borderWidth: 3, pointBackgroundColor: '#06b6d4', fill: true, yAxisID: 'y' },
+              { label: `Порывы (авиа. метод)`, data: gustData, borderColor: '#f97316', borderDash: [5,5], tension: 0.35, borderWidth: 2, pointBackgroundColor: '#f97316', fill: false, yAxisID: 'y' },
+              { label: 'Вероятность осадков (%)', type: 'bar', data: rainProbData, backgroundColor: 'rgba(139,92,246,0.35)', borderColor: '#a78bfa', borderWidth: 1, borderRadius: 4, yAxisID: 'yPrecip' }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } }, tooltip: { backgroundColor: '#0f172a', cornerRadius: 12 } },
+            scales: {
+              x: { grid: { color: 'rgba(51,65,85,0.1)' }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+              y: { position: 'left', grid: { color: 'rgba(51,65,85,0.15)' }, ticks: { color: '#94a3b8', font: { size: 9 } }, min: 0, max: Math.max(25, Math.max(...gustData) + 3) },
+              yPrecip: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#94a3b8', font: { size: 9 } }, min: 0, max: 100, title: { display: true, text: 'Вероятность осадков (%)', color: '#a78bfa', font: { size: 9, weight: 'bold' } } }
+            }
+          },
+          plugins: [{
+            id: 'windZoneBackground',
+            beforeDraw(chart) {
+              const { ctx, chartArea: { top, bottom, left, right }, scales: { y } } = chart;
+              ctx.save();
+              const ySafe = y.getPixelForValue(6);
+              const yCaution = y.getPixelForValue(10);
+              const yDanger = y.getPixelForValue(12);
+              ctx.fillStyle = 'rgba(16,185,129,0.05)'; ctx.fillRect(left, ySafe, right-left, bottom-ySafe);
+              ctx.fillStyle = 'rgba(245,158,11,0.05)'; ctx.fillRect(left, yCaution, right-left, ySafe-yCaution);
+              ctx.fillStyle = 'rgba(249,115,22,0.05)'; ctx.fillRect(left, yDanger, right-left, yCaution-yDanger);
+              ctx.fillStyle = 'rgba(239,68,68,0.05)'; ctx.fillRect(left, top, right-left, yDanger-top);
+              ctx.beginPath(); ctx.setLineDash([4,4]); ctx.lineWidth = 1;
+              ctx.strokeStyle = 'rgba(16,185,129,0.5)'; ctx.moveTo(left, ySafe); ctx.lineTo(right, ySafe); ctx.stroke();
+              ctx.beginPath(); ctx.strokeStyle = 'rgba(249,115,22,0.5)'; ctx.moveTo(left, yCaution); ctx.lineTo(right, yCaution); ctx.stroke();
+              ctx.beginPath(); ctx.strokeStyle = 'rgba(239,68,68,0.5)'; ctx.moveTo(left, yDanger); ctx.lineTo(right, yDanger); ctx.stroke();
+              ctx.restore();
+            }
+          }]
+        });
+      } else {
+        state.windChartInstance.data.labels = labels;
+        state.windChartInstance.data.datasets[0].data = windData;
+        state.windChartInstance.data.datasets[1].data = gustData;
+        state.windChartInstance.data.datasets[2].data = rainProbData;
+        state.windChartInstance.options.scales.y.max = Math.max(25, Math.max(...gustData) + 3);
+        state.windChartInstance.update('none');
+      }
+      
+      // ========== ГРАФИК ОБЛЕДЕНЕНИЯ ==========
+      if (!state.icingChartInstance) {
+        const ctx2 = document.getElementById('icingChart').getContext('2d');
+        state.icingChartInstance = new Chart(ctx2, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              { label: 'Температура (°C)', data: tempData, borderColor: '#ef4444', tension: 0.35, borderWidth: 2.5, pointBackgroundColor: '#ef4444', yAxisID: 'yTemp' },
+              { label: 'Относительная влажность (%)', data: humData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.04)', tension: 0.35, borderWidth: 1.5, fill: true, pointBackgroundColor: '#3b82f6', yAxisID: 'yHum' },
+              { label: 'Риск обледенения (%)', type: 'bar', data: icingRiskData, backgroundColor: 'rgba(14,165,233,0.5)', borderColor: '#0ea5e9', borderWidth: 1, borderRadius: 4, yAxisID: 'yRisk' }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } }, tooltip: { callbacks: { label: (ctx) => { if (ctx.dataset.label === 'Риск обледенения (%)') return `${ctx.raw}% вероятность льда на пропеллерах`; return `${ctx.dataset.label}: ${ctx.raw}`; } } } },
+            scales: {
+              x: { grid: { color: 'rgba(51,65,85,0.1)' }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+              yTemp: { position: 'left', title: { display: true, text: 'Температура (°C)', color: '#ef4444', font: { size: 9, weight: 'bold' } }, grid: { color: 'rgba(51,65,85,0.1)' }, ticks: { color: '#94a3b8' } },
+              yHum: { position: 'right', title: { display: true, text: 'Влажность (%)', color: '#3b82f6', font: { size: 9, weight: 'bold' } }, grid: { drawOnChartArea: false }, ticks: { color: '#94a3b8' }, min: 0, max: 100 },
+              yRisk: { position: 'right', title: { display: true, text: 'Риск обледенения (%)', color: '#0ea5e9', font: { size: 9, weight: 'bold' } }, grid: { drawOnChartArea: false }, ticks: { color: '#94a3b8' }, min: 0, max: 100 }
+            }
+          }
+        });
+      } else {
+        state.icingChartInstance.data.labels = labels;
+        state.icingChartInstance.data.datasets[0].data = tempData;
+        state.icingChartInstance.data.datasets[1].data = humData;
+        state.icingChartInstance.data.datasets[2].data = icingRiskData;
+        state.icingChartInstance.update();
+      }
+    }
+    
+    function computeIcingRisk(temp, humidity) {
+      if (temp > 5 || temp < -15) return 0;
+      let risk = 0;
+      const tempFactor = Math.max(0, 1 - Math.abs(temp + 1) / 8);
+      const humFactor = Math.min(1, Math.max(0, (humidity - 55) / 40));
+      risk = tempFactor * humFactor * 100;
+      if (temp >= -5 && temp <= 2 && humidity > 75) risk = Math.min(100, risk * 1.2);
+      return Math.min(100, Math.max(0, Math.round(risk)));
+    }
+  </script>
+</body>
+</html>
